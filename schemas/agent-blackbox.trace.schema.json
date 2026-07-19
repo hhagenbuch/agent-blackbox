@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hhagenbuch/agent-blackbox/schemas/agent-blackbox.trace.schema.json",
+  "title": "agent-blackbox trace event",
+  "description": "One line of a *.trace.jsonl file, version 0.1. A file is a sequence of these, one per line.",
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type": {
+      "enum": [
+        "session_start", "user_message", "llm_request", "llm_response",
+        "tool_call", "tool_result", "assistant_message", "error", "session_end"
+      ]
+    },
+    "redacted": {
+      "type": "boolean",
+      "description": "True when a configured redactor scrubbed a span in this event."
+    }
+  },
+  "oneOf": [
+    { "$ref": "#/$defs/session_start" },
+    { "$ref": "#/$defs/user_message" },
+    { "$ref": "#/$defs/llm_request" },
+    { "$ref": "#/$defs/llm_response" },
+    { "$ref": "#/$defs/tool_call" },
+    { "$ref": "#/$defs/tool_result" },
+    { "$ref": "#/$defs/assistant_message" },
+    { "$ref": "#/$defs/error" },
+    { "$ref": "#/$defs/session_end" }
+  ],
+  "$defs": {
+    "session_start": {
+      "properties": {
+        "type": { "const": "session_start" },
+        "v": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "at": { "type": "string" },
+        "runtime": {
+          "type": "object",
+          "properties": { "app": { "type": "string" }, "model": { "type": "string" } }
+        }
+      },
+      "required": ["type", "v", "sessionId", "at"]
+    },
+    "user_message": {
+      "properties": {
+        "type": { "const": "user_message" },
+        "turn": { "type": "integer" },
+        "text": { "type": "string" }
+      },
+      "required": ["type", "turn", "text"]
+    },
+    "llm_request": {
+      "properties": {
+        "type": { "const": "llm_request" },
+        "turn": { "type": "integer" },
+        "seq": { "type": "integer" },
+        "messagesDigest": { "type": "string", "pattern": "^sha256:" },
+        "toolsOffered": { "type": "array", "items": { "type": "string" } },
+        "messages": { "type": "array", "description": "Present only with --capture-full." }
+      },
+      "required": ["type", "turn", "seq", "messagesDigest"]
+    },
+    "llm_response": {
+      "properties": {
+        "type": { "const": "llm_response" },
+        "turn": { "type": "integer" },
+        "seq": { "type": "integer" },
+        "stopReason": { "type": "string" },
+        "text": { "type": "string" },
+        "toolCalls": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "input": {}
+            },
+            "required": ["id", "name"]
+          }
+        },
+        "usage": {
+          "type": "object",
+          "properties": { "in": { "type": "integer" }, "out": { "type": "integer" } }
+        },
+        "millis": { "type": "integer" },
+        "provenance": {
+          "type": "object",
+          "properties": { "answeredBy": { "type": "string" }, "link": { "type": "string" } }
+        }
+      },
+      "required": ["type", "turn", "seq", "stopReason"]
+    },
+    "tool_call": {
+      "properties": {
+        "type": { "const": "tool_call" },
+        "turn": { "type": "integer" },
+        "toolUseId": { "type": "string" },
+        "name": { "type": "string" },
+        "input": {}
+      },
+      "required": ["type", "turn", "toolUseId", "name"]
+    },
+    "tool_result": {
+      "properties": {
+        "type": { "const": "tool_result" },
+        "turn": { "type": "integer" },
+        "toolUseId": { "type": "string" },
+        "result": { "type": "string" },
+        "millis": { "type": "integer" },
+        "error": { "type": "boolean" }
+      },
+      "required": ["type", "turn", "toolUseId", "error"]
+    },
+    "assistant_message": {
+      "properties": {
+        "type": { "const": "assistant_message" },
+        "turn": { "type": "integer" },
+        "text": { "type": "string" }
+      },
+      "required": ["type", "turn", "text"]
+    },
+    "error": {
+      "properties": {
+        "type": { "const": "error" },
+        "turn": { "type": "integer" },
+        "where": { "enum": ["llm", "tool", "runtime"] },
+        "message": { "type": "string" }
+      },
+      "required": ["type", "where", "message"]
+    },
+    "session_end": {
+      "properties": {
+        "type": { "const": "session_end" },
+        "at": { "type": "string" }
+      },
+      "required": ["type", "at"]
+    }
+  }
+}
