@@ -5,9 +5,15 @@ import io.github.hhagenbuch.blackbox.core.TraceEvent;
 import io.github.hhagenbuch.blackbox.core.TraceWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.core.io.buffer.DataBufferUtils;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.server.reactive.ServerHttpRequest;
+import org.springframework.http.server.reactive.ServerHttpRequestDecorator;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.io.IOException;
@@ -57,12 +63,59 @@ public final class BlackboxWebFilter implements WebFilter {
             return chain.filter(exchange);
         }
 
+        // For POST /api/chat, cache the body so we can record the user's prompt as a
+        // user_message event AND still let the controller read it (re-wrapped below).
+        if (HttpMethod.POST.equals(exchange.getRequest().getMethod())) {
+            return DataBufferUtils.join(exchange.getRequest().getBody())
+                    .map(BlackboxWebFilter::toBytes)
+                    .defaultIfEmpty(new byte[0])
+                    .flatMap(body -> {
+                        recordUserMessage(session, body);
+                        return proceed(replayBody(exchange, body), chain, session);
+                    });
+        }
+        return proceed(exchange, chain, session);
+    }
+
+    private Mono<Void> proceed(ServerWebExchange exchange, WebFilterChain chain, RecordingSession session) {
         return chain.filter(exchange)
                 .contextWrite(ctx -> ctx.put(RecordingSession.CONTEXT_KEY, session))
                 .doFinally(signal -> {
                     session.write(TraceEvent.sessionEnd(Instant.now().toString()));
                     session.close();
                 });
+    }
+
+    private void recordUserMessage(RecordingSession session, byte[] body) {
+        if (body.length == 0) {
+            return;
+        }
+        try {
+            String message = TraceEvent.mapper().readTree(body).path("message").asText(null);
+            if (message != null) {
+                session.write(TraceEvent.userMessage(1, message));
+            }
+        } catch (IOException ignored) {
+            // not JSON we understand; skip the user_message but keep recording the rest
+        }
+    }
+
+    /** Re-exposes the already-read body so the controller can still consume it. */
+    private ServerWebExchange replayBody(ServerWebExchange exchange, byte[] body) {
+        ServerHttpRequest decorated = new ServerHttpRequestDecorator(exchange.getRequest()) {
+            @Override
+            public Flux<DataBuffer> getBody() {
+                return Flux.defer(() -> Flux.just(exchange.getResponse().bufferFactory().wrap(body)));
+            }
+        };
+        return exchange.mutate().request(decorated).build();
+    }
+
+    private static byte[] toBytes(DataBuffer buffer) {
+        byte[] bytes = new byte[buffer.readableByteCount()];
+        buffer.read(bytes);
+        DataBufferUtils.release(buffer);
+        return bytes;
     }
 
     private boolean isChatRequest(ServerWebExchange exchange) {

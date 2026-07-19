@@ -66,10 +66,14 @@ class BlackboxRecordingIntegrationTest {
         // the full trajectory the agent took, in order
         assertThat(types).containsSubsequence(
                 "session_start",
+                "user_message",                  // the prompt, captured from the request body
                 "llm_request", "llm_response",   // model asks for the calculator
                 "tool_call", "tool_result",      // calculator runs (recorded via the AgentTool seam)
                 "llm_request", "llm_response",   // model answers
                 "session_end");
+
+        assertThat(firstOfType(events, "user_message").text())
+                .isEqualTo("what is 2 + 2? use your calculator");
 
         // the tool_call/tool_result pair correlates by a single toolUseId
         TraceEvent toolCall = firstOfType(events, "tool_call");
