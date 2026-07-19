@@ -66,7 +66,7 @@ produces behavior → **agent-blackbox captures it** →
 
 - [ ] Phase 0 — design doc + trace schema (this)
 - [x] Phase 1 — `blackbox-core`: format + reader/writer (truncation-tolerant) + redaction
-- [ ] Phase 2 — `blackbox-spring`: decorate-the-seam recording, zero target changes
+- [x] Phase 2 — `blackbox-spring`: decorate-the-seam recording, zero target changes
 - [ ] Phase 3 — replay + divergence detection + `--interactive`, with the no-side-effects safety test
 - [ ] Phase 4 — diff + `export-eval` (validated by running agent-evals in CI) + README GIF
 

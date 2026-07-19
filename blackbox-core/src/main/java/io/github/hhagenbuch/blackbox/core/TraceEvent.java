@@ -29,6 +29,11 @@ public final class TraceEvent {
         return new TraceEvent(node);
     }
 
+    /** Shared mapper for building event nodes (arrays, nested objects) in other modules. */
+    public static ObjectMapper mapper() {
+        return MAPPER;
+    }
+
     /** Starts a new event of the given type. */
     public static TraceEvent ofType(String type) {
         ObjectNode node = MAPPER.createObjectNode();

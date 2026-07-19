@@ -13,7 +13,15 @@
 
     <modules>
         <module>blackbox-core</module>
+        <module>blackbox-spring</module>
     </modules>
+
+    <repositories>
+        <repository>
+            <id>jitpack.io</id>
+            <url>https://jitpack.io</url>
+        </repository>
+    </repositories>
 
     <properties>
         <maven.compiler.release>21</maven.compiler.release>
@@ -21,10 +29,20 @@
         <jackson.version>2.17.2</jackson.version>
         <junit.version>5.10.3</junit.version>
         <assertj.version>3.26.3</assertj.version>
+        <spring-boot.version>3.3.5</spring-boot.version>
+        <starter.version>v0.1.1</starter.version>
     </properties>
 
     <dependencyManagement>
         <dependencies>
+            <!-- Spring Boot BOM: version management only (no deps pulled into blackbox-core). -->
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring-boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>
                 <artifactId>jackson-databind</artifactId>
