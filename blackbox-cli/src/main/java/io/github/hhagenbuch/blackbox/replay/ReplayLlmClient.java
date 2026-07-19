@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hhagenbuch.agent.llm.LlmClient;
 import io.github.hhagenbuch.agent.llm.LlmResponse;
+import io.github.hhagenbuch.agent.llm.TokenUsage;
 import io.github.hhagenbuch.agent.llm.ToolCall;
 import io.github.hhagenbuch.agent.tools.AgentTool;
 import io.github.hhagenbuch.blackbox.core.TraceEvent;
@@ -91,7 +92,8 @@ public final class ReplayLlmClient implements LlmClient {
         JsonNode rawContent = event.node().has("rawContent")
                 ? event.node().get("rawContent")
                 : reconstructContent(text, toolCalls);
-        return new LlmResponse(text, toolCalls, rawContent, stopReason);
+        // Replay carries no token accounting (the recording doesn't need it) — usage is EMPTY.
+        return new LlmResponse(text, toolCalls, rawContent, stopReason, TokenUsage.EMPTY);
     }
 
     private static ArrayNode reconstructContent(String text, List<ToolCall> toolCalls) {

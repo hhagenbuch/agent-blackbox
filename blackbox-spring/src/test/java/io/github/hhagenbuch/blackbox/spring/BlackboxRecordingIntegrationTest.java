@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hhagenbuch.agent.AgentStarterApplication;
 import io.github.hhagenbuch.agent.llm.LlmClient;
 import io.github.hhagenbuch.agent.llm.LlmResponse;
+import io.github.hhagenbuch.agent.llm.TokenUsage;
 import io.github.hhagenbuch.agent.llm.ToolCall;
 import io.github.hhagenbuch.agent.tools.AgentTool;
 import io.github.hhagenbuch.blackbox.core.TraceEvent;
@@ -114,11 +115,11 @@ class BlackboxRecordingIntegrationTest {
                         content.addObject().put("type", "tool_use").put("id", "tu_1").put("name", "calculator")
                                 .set("input", input);
                         return Mono.just(new LlmResponse("", List.of(new ToolCall("tu_1", "calculator", input)),
-                                content, "tool_use"));
+                                content, "tool_use", TokenUsage.EMPTY));
                     }
                     ArrayNode content = mapper.createArrayNode();
                     content.addObject().put("type", "text").put("text", "2 + 2 = 4");
-                    return Mono.just(new LlmResponse("2 + 2 = 4", List.of(), content, "end_turn"));
+                    return Mono.just(new LlmResponse("2 + 2 = 4", List.of(), content, "end_turn", TokenUsage.EMPTY));
                 }
             };
         }
