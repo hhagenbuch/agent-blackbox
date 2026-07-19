@@ -17,19 +17,21 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Opens a trace per chat request and publishes the {@link RecordingSession} into
- * the Reactor Context so the downstream decorators (which never see a request or
- * a session id) can attribute their events. Writes {@code session_start} on entry
- * and {@code session_end} when the request completes.
+ * Opens (or reuses) a trace for the chat request and publishes the {@link RecordingSession}
+ * into the Reactor Context so the downstream decorators can attribute their events.
  *
- * <p>The session key is a blackbox-assigned trace id — the seam does not carry
- * the app's own session id, and reading the request body here would consume it
- * before the controller. One request = one trace = one turn.
+ * <p>Traces are keyed by the application's own {@code sessionId} (read from the POST body),
+ * so a multi-turn conversation is <b>one append-only trace</b> with turns numbered within
+ * it — which is what the conversation-level {@code diff} and {@code export-eval --turn}
+ * features need. A request with no {@code sessionId} falls back to a per-request trace.
+ * A keyed conversation is finalized on {@code DELETE /api/chat/{sessionId}} (reset) or at
+ * shutdown (see {@link SessionRegistry}).
  */
 public final class BlackboxWebFilter implements WebFilter {
 
@@ -38,10 +40,12 @@ public final class BlackboxWebFilter implements WebFilter {
 
     private final BlackboxProperties props;
     private final Redactor redactor;
+    private final SessionRegistry registry;
 
-    public BlackboxWebFilter(BlackboxProperties props) {
+    public BlackboxWebFilter(BlackboxProperties props, SessionRegistry registry) {
         this.props = props;
         this.redactor = props.isRedact() ? Redactor.defaults() : Redactor.none();
+        this.registry = registry;
     }
 
     @Override
@@ -49,54 +53,92 @@ public final class BlackboxWebFilter implements WebFilter {
         if (!isChatRequest(exchange)) {
             return chain.filter(exchange);
         }
+        HttpMethod method = exchange.getRequest().getMethod();
 
-        String traceId = UUID.randomUUID().toString();
+        // Reset ends the conversation's trace.
+        if (HttpMethod.DELETE.equals(method)) {
+            String sessionId = sessionIdFromPath(exchange);
+            if (sessionId != null) {
+                registry.close(sessionId);
+            }
+            return chain.filter(exchange);
+        }
+
+        // POST /api/chat: the sessionId and prompt live in the body — read it (and re-inject
+        // it so the controller can still consume it).
+        if (HttpMethod.POST.equals(method)) {
+            return DataBufferUtils.join(exchange.getRequest().getBody())
+                    .map(BlackboxWebFilter::toBytes)
+                    .defaultIfEmpty(new byte[0])
+                    .flatMap(body -> openTurn(replayBody(exchange, body), chain,
+                            jsonField(body, "sessionId"), jsonField(body, "message")));
+        }
+
+        // Other chat methods (e.g. the SSE GET) carry the ids on the query string.
+        String sessionId = exchange.getRequest().getQueryParams().getFirst("sessionId");
+        String message = exchange.getRequest().getQueryParams().getFirst("message");
+        return openTurn(exchange, chain, sessionId, message);
+    }
+
+    private Mono<Void> openTurn(ServerWebExchange exchange, WebFilterChain chain,
+                                String sessionId, String message) {
+        boolean keyed = sessionId != null && !sessionId.isBlank();
         RecordingSession session;
         try {
-            Path file = Path.of(props.getTraceDir())
-                    .resolve(traceId + "-" + Instant.now().toEpochMilli() + ".trace.jsonl");
-            session = new RecordingSession(traceId, new TraceWriter(file, redactor, props.isFsyncPerEvent()));
-            session.write(TraceEvent.sessionStart("0.1", traceId, Instant.now().toString(),
-                    props.getApp(), props.getModel()));
-        } catch (IOException e) {
+            session = keyed
+                    ? registry.getOrCreate(sessionId, () -> newSession(sessionId))
+                    : newSession(UUID.randomUUID().toString());
+        } catch (UncheckedIOException e) {
             log.warn("blackbox: could not open a trace for this request: {}", e.getMessage());
             return chain.filter(exchange);
         }
 
-        // For POST /api/chat, cache the body so we can record the user's prompt as a
-        // user_message event AND still let the controller read it (re-wrapped below).
-        if (HttpMethod.POST.equals(exchange.getRequest().getMethod())) {
-            return DataBufferUtils.join(exchange.getRequest().getBody())
-                    .map(BlackboxWebFilter::toBytes)
-                    .defaultIfEmpty(new byte[0])
-                    .flatMap(body -> {
-                        recordUserMessage(session, body);
-                        return proceed(replayBody(exchange, body), chain, session);
-                    });
+        session.nextTurn();
+        if (message != null && !message.isEmpty()) {
+            session.write(TraceEvent.userMessage(session.turn(), message));
         }
-        return proceed(exchange, chain, session);
+
+        Mono<Void> downstream = chain.filter(exchange)
+                .contextWrite(ctx -> ctx.put(RecordingSession.CONTEXT_KEY, session));
+        // Keyed sessions live across turns — the registry closes them on reset/shutdown.
+        // A transient (unkeyed) trace is one turn, so close it when the request completes.
+        return keyed ? downstream : downstream.doFinally(signal -> {
+            session.write(TraceEvent.sessionEnd(Instant.now().toString()));
+            session.close();
+        });
     }
 
-    private Mono<Void> proceed(ServerWebExchange exchange, WebFilterChain chain, RecordingSession session) {
-        return chain.filter(exchange)
-                .contextWrite(ctx -> ctx.put(RecordingSession.CONTEXT_KEY, session))
-                .doFinally(signal -> {
-                    session.write(TraceEvent.sessionEnd(Instant.now().toString()));
-                    session.close();
-                });
+    /** Opens a new trace file and writes {@code session_start}; wraps IO failure unchecked. */
+    private RecordingSession newSession(String traceId) {
+        try {
+            Path file = Path.of(props.getTraceDir())
+                    .resolve(safe(traceId) + "-" + Instant.now().toEpochMilli() + ".trace.jsonl");
+            RecordingSession session =
+                    new RecordingSession(traceId, new TraceWriter(file, redactor, props.isFsyncPerEvent()));
+            session.write(TraceEvent.sessionStart("0.1", traceId, Instant.now().toString(),
+                    props.getApp(), props.getModel()));
+            return session;
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
-    private void recordUserMessage(RecordingSession session, byte[] body) {
+    private String sessionIdFromPath(ServerWebExchange exchange) {
+        String path = exchange.getRequest().getPath().value();
+        String prefix = CHAT_PATH + "/";
+        return path.startsWith(prefix) && path.length() > prefix.length()
+                ? path.substring(prefix.length())
+                : null;
+    }
+
+    private static String jsonField(byte[] body, String field) {
         if (body.length == 0) {
-            return;
+            return null;
         }
         try {
-            String message = TraceEvent.mapper().readTree(body).path("message").asText(null);
-            if (message != null) {
-                session.write(TraceEvent.userMessage(1, message));
-            }
-        } catch (IOException ignored) {
-            // not JSON we understand; skip the user_message but keep recording the rest
+            return TraceEvent.mapper().readTree(body).path(field).asText(null);
+        } catch (IOException e) {
+            return null; // not JSON we understand
         }
     }
 
@@ -116,6 +158,11 @@ public final class BlackboxWebFilter implements WebFilter {
         buffer.read(bytes);
         DataBufferUtils.release(buffer);
         return bytes;
+    }
+
+    /** Keep the trace-id filename-safe (session ids are usually UUIDs, but don't assume). */
+    private static String safe(String id) {
+        return id.replaceAll("[^A-Za-z0-9._-]", "_");
     }
 
     private boolean isChatRequest(ServerWebExchange exchange) {

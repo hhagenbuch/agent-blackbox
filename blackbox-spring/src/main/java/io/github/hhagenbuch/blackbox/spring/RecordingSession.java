@@ -6,10 +6,10 @@ import io.github.hhagenbuch.blackbox.core.TraceWriter;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * The recording state for one request, carried in the Reactor Context so the
- * decorators can find it without the starter passing anything down. One HTTP
- * chat request is one trace file and one logical turn; {@code seq} orders the
- * model calls within it.
+ * The recording state for one conversation, carried in the Reactor Context so the
+ * decorators can find it without the starter passing anything down. A trace spans the
+ * whole session (all its chat requests): {@code turn} counts the requests/turns, and
+ * {@code seq} orders the model calls within the current turn.
  */
 public final class RecordingSession {
 
@@ -19,6 +19,7 @@ public final class RecordingSession {
     private final String traceId;
     private final TraceWriter writer;
     private final AtomicInteger seq = new AtomicInteger();
+    private final AtomicInteger turn = new AtomicInteger();
 
     public RecordingSession(String traceId, TraceWriter writer) {
         this.traceId = traceId;
@@ -31,6 +32,16 @@ public final class RecordingSession {
 
     public int nextSeq() {
         return seq.incrementAndGet();
+    }
+
+    /** Advance to the next turn (called once per chat request); returns the new turn number. */
+    public int nextTurn() {
+        return turn.incrementAndGet();
+    }
+
+    /** The current turn — what the decorators tag their events with. */
+    public int turn() {
+        return Math.max(1, turn.get());
     }
 
     /** Writes an event; failures are swallowed so recording never breaks the request. */

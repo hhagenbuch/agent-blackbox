@@ -36,27 +36,28 @@ public final class RecordingLlmClient implements LlmClient {
                 return delegate.chat(messages, tools);
             }
             RecordingSession session = ctx.get(RecordingSession.CONTEXT_KEY);
+            int turn = session.turn();
             int seq = session.nextSeq();
             long start = System.nanoTime();
-            session.write(request(seq, messages, tools));
+            session.write(request(turn, seq, messages, tools));
             return delegate.chat(messages, tools)
-                    .doOnNext(response -> session.write(response(seq, response, millisSince(start))))
+                    .doOnNext(response -> session.write(response(turn, seq, response, millisSince(start))))
                     .doOnError(error -> session.write(
-                            TraceEvent.error(1, "llm", String.valueOf(error.getMessage()))));
+                            TraceEvent.error(turn, "llm", String.valueOf(error.getMessage()))));
         });
     }
 
-    private TraceEvent request(int seq, List<ObjectNode> messages, Collection<AgentTool> tools) {
+    private TraceEvent request(int turn, int seq, List<ObjectNode> messages, Collection<AgentTool> tools) {
         ArrayNode offered = TraceEvent.mapper().createArrayNode();
         tools.forEach(t -> offered.add(t.name()));
         return TraceEvent.ofType("llm_request")
-                .with("turn", 1)
+                .with("turn", turn)
                 .with("seq", seq)
                 .with("messagesDigest", digest(messages))
                 .with("toolsOffered", offered);
     }
 
-    private TraceEvent response(int seq, LlmResponse response, long millis) {
+    private TraceEvent response(int turn, int seq, LlmResponse response, long millis) {
         ArrayNode toolCalls = TraceEvent.mapper().createArrayNode();
         for (ToolCall call : response.toolCalls()) {
             ObjectNode c = toolCalls.addObject();
@@ -65,7 +66,7 @@ public final class RecordingLlmClient implements LlmClient {
             c.set("input", call.input());
         }
         TraceEvent event = TraceEvent.ofType("llm_response")
-                .with("turn", 1)
+                .with("turn", turn)
                 .with("seq", seq)
                 .with("stopReason", response.stopReason())
                 .with("text", response.text())
