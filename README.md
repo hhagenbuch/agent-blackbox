@@ -1,5 +1,8 @@
 # agent-blackbox
 
+[![CI](https://github.com/hhagenbuch/agent-blackbox/actions/workflows/ci.yml/badge.svg)](https://github.com/hhagenbuch/agent-blackbox/actions/workflows/ci.yml)
+![Java 21](https://img.shields.io/badge/Java-21-blue)
+
 > When an agent misbehaves in production, you get a support ticket and a shrug.
 > There's no stack trace for "it chose the wrong tool and then lied about it."
 > `agent-blackbox` is the flight recorder: every session is captured as an
@@ -62,7 +65,7 @@ produces behavior → **agent-blackbox captures it** →
 ## Roadmap
 
 - [ ] Phase 0 — design doc + trace schema (this)
-- [ ] Phase 1 — `blackbox-core`: format + streaming reader/writer (truncation-tolerant) + redaction
+- [x] Phase 1 — `blackbox-core`: format + reader/writer (truncation-tolerant) + redaction
 - [ ] Phase 2 — `blackbox-spring`: decorate-the-seam recording, zero target changes
 - [ ] Phase 3 — replay + divergence detection + `--interactive`, with the no-side-effects safety test
 - [ ] Phase 4 — diff + `export-eval` (validated by running agent-evals in CI) + README GIF
