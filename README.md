@@ -14,9 +14,16 @@
 **Every production incident becomes a permanent eval case with one command.**
 Debugging and testing stop being separate activities.
 
-**Status: Phase 0 — design.** This repo currently contains the design and the
-trace-file schema. See [`docs/DESIGN.md`](docs/DESIGN.md) and
-[`docs/TRACE-FORMAT.md`](docs/TRACE-FORMAT.md). Code lands in phases; roadmap below.
+**Status: MVP.** Record (zero starter changes), replay (safe + judgmental), diff,
+and export-eval all work. Design and format:
+[`docs/DESIGN.md`](docs/DESIGN.md), [`docs/TRACE-FORMAT.md`](docs/TRACE-FORMAT.md).
+
+```console
+$ blackbox export-eval incident.trace.jsonl --turn 1 --out cases/incident-1234.yaml
+# → an agent-evals case: the prompt, tool_called assertions from the real
+#   trajectory, and a judge stub for a human to confirm. Every incident becomes
+#   a regression test.
+```
 
 ## How it works
 
@@ -82,7 +89,8 @@ produces behavior → **agent-blackbox captures it** →
 - [x] Phase 1 — `blackbox-core`: format + reader/writer (truncation-tolerant) + redaction
 - [x] Phase 2 — `blackbox-spring`: decorate-the-seam recording, zero target changes
 - [x] Phase 3 — replay + divergence detection (safe: recorded tool results, stubbed side-effects)
-- [ ] Phase 4 — diff + `export-eval` (validated by running agent-evals in CI) + README GIF
+- [x] Phase 4 — `diff` + `export-eval` (emits valid agent-evals YAML)
+- [ ] Later — cross-repo eval run in CI; loop-replay from prompt; trace viewer; README GIF
 
 ## License
 
