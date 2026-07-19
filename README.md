@@ -45,19 +45,24 @@ $ blackbox export-eval incident.trace.jsonl --turn 1 --out cases/incident-1234.y
    case: the prompt, `tool_called` assertions from the real trajectory, and a
    `judge` stub for a human to confirm.
 
-Replay is working today:
+Replay re-runs the **real agent** over the recorded inputs — a `ReplayLlmClient`
+feeds the recorded model responses (no key, no network) and the recorded prompt
+drives the loop — and reports where current code now behaves differently
+(different request to the model, different tool call, or a changed result):
 
 ```console
 $ blackbox replay incident.trace.jsonl
 replay: faithful — current code reproduces the recorded trajectory   # exit 0
 
-$ blackbox replay incident.trace.jsonl        # after a tool regression
+$ blackbox replay incident.trace.jsonl --execute calculator          # after a tool regression
 replay: DIVERGED (1)
-  ✗ [tool.result] calculator (t1): recorded "468013", got "999999"   # exit 1
+  ✗ [tool.result] calculator (tu1): recorded "468013", got "999999"  # exit 1
 ```
 
-Recorded tool results are trusted and side-effecting tools are `--stub`bed, so a
-replay of a session that sent an email **cannot send it again** — its own test.
+**Tools are never executed on replay by default** — recorded results are
+authoritative, so a replay of a session that sent an email *cannot send it
+again*. `--execute <tool>` opts a specific (safe) tool back in for behavioral
+comparison. This is its own test.
 
 It closes a loop no single repo can:
 [spring-ai-agent-starter](https://github.com/hhagenbuch/spring-ai-agent-starter)

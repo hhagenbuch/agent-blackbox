@@ -69,22 +69,41 @@ public final class ReplayLlmClient implements LlmClient {
         return List.copyOf(divergences);
     }
 
+    /** How many model calls the current code actually made. */
+    public int callsMade() {
+        return index.get();
+    }
+
+    /** How many the trace recorded. Differ → the agent looped a different number of times. */
+    public int recordedResponseCount() {
+        return responses.size();
+    }
+
     private static LlmResponse toResponse(TraceEvent event) {
         String text = event.node().path("text").asText("");
         String stopReason = event.node().path("stopReason").asText("end_turn");
         List<ToolCall> toolCalls = new ArrayList<>();
+        for (JsonNode call : event.node().path("toolCalls")) {
+            toolCalls.add(new ToolCall(call.path("id").asText(), call.path("name").asText(), call.path("input")));
+        }
+        // Prefer the recorded raw content (byte-identical replay); reconstruct only for
+        // older traces that predate rawContent capture.
+        JsonNode rawContent = event.node().has("rawContent")
+                ? event.node().get("rawContent")
+                : reconstructContent(text, toolCalls);
+        return new LlmResponse(text, toolCalls, rawContent, stopReason);
+    }
+
+    private static ArrayNode reconstructContent(String text, List<ToolCall> toolCalls) {
         ArrayNode content = TraceEvent.mapper().createArrayNode();
         if (!text.isEmpty()) {
             content.addObject().put("type", "text").put("text", text);
         }
-        for (JsonNode call : event.node().path("toolCalls")) {
-            String id = call.path("id").asText();
-            String name = call.path("name").asText();
-            JsonNode input = call.path("input");
-            toolCalls.add(new ToolCall(id, name, input));
-            content.addObject().put("type", "tool_use").put("id", id).put("name", name).set("input", input);
+        for (ToolCall call : toolCalls) {
+            content.addObject().put("type", "tool_use").put("id", call.id()).put("name", call.name())
+                    .set("input", call.input());
         }
-        return new LlmResponse(text, toolCalls, content, stopReason);
+        return content;
     }
 
     private static String digest(List<ObjectNode> messages) {

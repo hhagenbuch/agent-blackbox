@@ -2,7 +2,6 @@ package io.github.hhagenbuch.blackbox.cli;
 
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.github.hhagenbuch.agent.tools.ToolRegistry;
 import io.github.hhagenbuch.agent.tools.impl.CalculatorTool;
 import io.github.hhagenbuch.agent.tools.impl.ClockTool;
 import io.github.hhagenbuch.blackbox.core.TraceEvent;
@@ -21,7 +20,7 @@ import java.util.Set;
 
 /**
  * <pre>
- * blackbox replay      &lt;trace.jsonl&gt; [--stub &lt;tool&gt;]... [--json]
+ * blackbox replay      &lt;trace.jsonl&gt; [--execute &lt;tool&gt;]... [--json]
  * blackbox diff        &lt;a.trace.jsonl&gt; &lt;b.trace.jsonl&gt; [--json]
  * blackbox export-eval &lt;trace.jsonl&gt; [--turn N] [--out FILE] [--name NAME]
  * </pre>
@@ -51,15 +50,15 @@ public final class Cli {
     private static int replay(String[] args) {
         String tracePath = null;
         boolean json = false;
-        Set<String> stubbed = new LinkedHashSet<>();
+        Set<String> execute = new LinkedHashSet<>();
         for (int i = 1; i < args.length; i++) {
             switch (args[i]) {
                 case "--json" -> json = true;
-                case "--stub" -> {
+                case "--execute" -> {
                     if (i + 1 >= args.length) {
-                        return usage("--stub needs a tool name");
+                        return usage("--execute needs a tool name");
                     }
-                    stubbed.add(args[++i]);
+                    execute.add(args[++i]);
                 }
                 default -> {
                     if (args[i].startsWith("--") || tracePath != null) {
@@ -73,8 +72,10 @@ public final class Cli {
             return usage("missing <trace.jsonl>");
         }
         List<TraceEvent> events = TraceReader.readEvents(Path.of(tracePath));
-        ToolRegistry registry = new ToolRegistry(List.of(new CalculatorTool(), new ClockTool()));
-        DivergenceReport report = new Replayer(registry, stubbed).replay(events);
+        // The starter's tools, available for --execute'd behavioral comparison. By default
+        // NO tool runs — recorded results are authoritative, so replay has no side-effects.
+        Replayer replayer = new Replayer(List.of(new CalculatorTool(), new ClockTool()));
+        DivergenceReport report = replayer.replay(events, execute);
         System.out.println(json ? replayJson(report) : report.render());
         return report.exitCode();
     }
@@ -168,7 +169,7 @@ public final class Cli {
     private static int usage(String problem) {
         System.err.println("error: " + problem);
         System.err.println("usage:");
-        System.err.println("  blackbox replay <trace.jsonl> [--stub <tool>]... [--json]");
+        System.err.println("  blackbox replay <trace.jsonl> [--execute <tool>]... [--json]");
         System.err.println("  blackbox diff <a.trace.jsonl> <b.trace.jsonl> [--json]");
         System.err.println("  blackbox export-eval <trace.jsonl> [--turn N] [--out FILE] [--name NAME]");
         return 2;

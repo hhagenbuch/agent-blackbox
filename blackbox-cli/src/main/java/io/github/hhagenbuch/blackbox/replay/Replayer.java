@@ -1,76 +1,70 @@
 package io.github.hhagenbuch.blackbox.replay;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import io.github.hhagenbuch.agent.tools.ToolRegistry;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hhagenbuch.agent.config.AgentProperties;
+import io.github.hhagenbuch.agent.core.AgentLoop;
+import io.github.hhagenbuch.agent.core.ConversationMemory;
+import io.github.hhagenbuch.agent.tools.AgentTool;
 import io.github.hhagenbuch.blackbox.core.TraceEvent;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 /**
- * Replays a trace's tool calls against the <em>current</em> tools and reports
- * divergence — the safe, judgmental half of replay.
+ * Replays the recorded session through the <em>real</em> {@link AgentLoop},
+ * driven by a {@link ReplayLlmClient} (recorded model responses, no key/network)
+ * and the recorded prompt. This is the headline: it re-runs the current agent
+ * code over the recorded inputs and reports where it now behaves differently.
  *
- * <p>For each recorded {@code tool_call} it runs the current tool with the
- * recorded input and compares the result to the recorded {@code tool_result}. A
- * mismatch (a tool whose behavior changed, or one that was renamed/removed) is a
- * divergence. Tools named in {@code stubbed} are <strong>never executed</strong>
- * — their recorded result stands — so replaying a session that sent an email
- * cannot send it again. Safety is the default posture, not an afterthought.
+ * <p>Divergence classes:
+ * <ul>
+ *   <li>{@code request.digest} — the current code assembled a different request
+ *       to the model (a loop-logic or context change);</li>
+ *   <li>{@code tool.call} / {@code tool.input} — it invoked a different tool or
+ *       input than recorded;</li>
+ *   <li>{@code tool.result} — a re-executed ({@code --execute}) tool's output
+ *       changed;</li>
+ *   <li>{@code model.calls} — it looped a different number of times.</li>
+ * </ul>
+ * Tools are stubbed with recorded results by default — no side-effects.
  */
 public final class Replayer {
 
-    private final ToolRegistry tools;
-    private final Set<String> stubbed;
+    private final List<AgentTool> tools;
 
-    public Replayer(ToolRegistry tools, Set<String> stubbed) {
+    public Replayer(List<AgentTool> tools) {
         this.tools = tools;
-        this.stubbed = Set.copyOf(stubbed);
     }
 
-    public DivergenceReport replay(List<TraceEvent> events) {
-        Map<String, TraceEvent> resultByToolUseId = new HashMap<>();
-        for (TraceEvent event : events) {
-            if (event.type().equals("tool_result")) {
-                resultByToolUseId.put(event.get("toolUseId").asText(), event);
-            }
-        }
+    public DivergenceReport replay(List<TraceEvent> events, Set<String> execute) {
+        String prompt = recordedPrompt(events);
+
+        ReplayLlmClient llm = ReplayLlmClient.fromTrace(events);
+        ReplayToolRegistry registry = new ReplayToolRegistry(tools, events, execute);
+        AgentProperties props = new AgentProperties("", "replay", 4096, 24, 0, List.of());
+        AgentLoop loop = new AgentLoop(llm, registry, new ConversationMemory(), props, new ObjectMapper());
+
+        // Drive the real agent over the recorded inputs.
+        loop.run("replay", prompt).block();
 
         List<Divergence> divergences = new ArrayList<>();
-        for (TraceEvent event : events) {
-            if (!event.type().equals("tool_call")) {
-                continue;
-            }
-            String name = event.get("name").asText();
-            String toolUseId = event.get("toolUseId").asText();
-            JsonNode input = event.get("input");
-            TraceEvent recorded = resultByToolUseId.get(toolUseId);
-            String recordedResult = recorded != null ? recorded.get("result").asText() : null;
-
-            if (stubbed.contains(name)) {
-                // Safety: do not execute — the recorded result is authoritative.
-                continue;
-            }
-
-            String actual = execute(name, input);
-            if (recordedResult != null && !recordedResult.equals(actual)) {
-                divergences.add(new Divergence("tool.result", name + " (" + toolUseId + ")",
-                        recordedResult, actual));
-            }
+        divergences.addAll(llm.divergences());
+        divergences.addAll(registry.divergences());
+        if (llm.callsMade() != llm.recordedResponseCount()) {
+            divergences.add(new Divergence("model.calls", "turn",
+                    llm.recordedResponseCount() + " model call(s)", llm.callsMade() + " model call(s)"));
         }
         return new DivergenceReport(divergences);
     }
 
-    private String execute(String name, JsonNode input) {
-        try {
-            // ToolRegistry already converts unknown tools and failures into "ERROR: …" strings,
-            // so a renamed/removed tool surfaces as a divergence rather than an exception.
-            return tools.execute(name, input).block();
-        } catch (RuntimeException e) {
-            return "ERROR: " + e.getMessage();
-        }
+    private String recordedPrompt(List<TraceEvent> events) {
+        return events.stream()
+                .filter(e -> e.type().equals("user_message"))
+                .map(TraceEvent::text)
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "trace has no user_message — replay needs the recorded prompt "
+                                + "(record with a recorder that captures it)"));
     }
 }

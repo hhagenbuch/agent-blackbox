@@ -2,60 +2,55 @@ package io.github.hhagenbuch.blackbox.replay;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hhagenbuch.agent.tools.AgentTool;
-import io.github.hhagenbuch.agent.tools.ToolRegistry;
 import io.github.hhagenbuch.agent.tools.impl.CalculatorTool;
 import io.github.hhagenbuch.blackbox.core.TraceEvent;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ReplayerTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
 
-    /** A trace fragment: calculator(2 + 2) recorded as returning "4". */
-    private List<TraceEvent> calculatorTrace(String recordedResult) {
-        ObjectNode input = mapper.createObjectNode().put("expression", "2 + 2");
-        return List.of(
-                TraceEvent.ofType("tool_call").with("turn", 1)
-                        .with("toolUseId", "t1").with("name", "calculator").with("input", input),
-                TraceEvent.ofType("tool_result").with("turn", 1)
-                        .with("toolUseId", "t1").with("result", recordedResult));
+    // --- trace builders ---
+
+    private TraceEvent toolUseResponse(int seq, String tool, ObjectNode input) {
+        ArrayNode toolCalls = mapper.createArrayNode();
+        toolCalls.addObject().put("id", "tu" + seq).put("name", tool).set("input", input);
+        return TraceEvent.ofType("llm_response").with("turn", 1).with("seq", seq)
+                .with("stopReason", "tool_use").with("toolCalls", toolCalls);
     }
 
-    @Test
-    void faithfulWhenTheToolStillBehavesTheSame() {
-        ToolRegistry registry = new ToolRegistry(List.of(new CalculatorTool()));
-        DivergenceReport report = new Replayer(registry, Set.of()).replay(calculatorTrace("4"));
-        assertThat(report.faithful()).isTrue();
-        assertThat(report.exitCode()).isZero();
+    private TraceEvent endTurn(int seq, String text) {
+        return TraceEvent.ofType("llm_response").with("turn", 1).with("seq", seq)
+                .with("stopReason", "end_turn").with("text", text);
     }
 
-    @Test
-    void divergesWhenAToolsBehaviorChanged() {
-        // a "calculator" that now returns the wrong answer
-        ToolRegistry registry = new ToolRegistry(List.of(fixedTool("calculator", "5")));
-        DivergenceReport report = new Replayer(registry, Set.of()).replay(calculatorTrace("4"));
-
-        assertThat(report.faithful()).isFalse();
-        assertThat(report.exitCode()).isEqualTo(1);
-        Divergence d = report.divergences().get(0);
-        assertThat(d.kind()).isEqualTo("tool.result");
-        assertThat(d.expected()).isEqualTo("4");
-        assertThat(d.actual()).isEqualTo("5");
+    /** A one-tool session: prompt → calls a tool → answers. */
+    private List<TraceEvent> session(String tool, ObjectNode input, String recordedResult) {
+        List<TraceEvent> t = new ArrayList<>();
+        t.add(TraceEvent.userMessage(1, "do the thing"));
+        t.add(toolUseResponse(1, tool, input));
+        t.add(TraceEvent.ofType("tool_call").with("turn", 1).with("toolUseId", "tu1")
+                .with("name", tool).with("input", input));
+        t.add(TraceEvent.ofType("tool_result").with("turn", 1).with("toolUseId", "tu1")
+                .with("result", recordedResult));
+        t.add(endTurn(2, "done"));
+        return t;
     }
 
-    @Test
-    void stubbedToolIsNeverExecutedOnReplay() {
-        AtomicInteger sends = new AtomicInteger();
-        AgentTool email = new AgentTool() {
+    private AgentTool emailSpy(AtomicInteger sends) {
+        return new AgentTool() {
             public String name() {
                 return "send_email";
             }
@@ -69,49 +64,63 @@ class ReplayerTest {
             }
 
             public Mono<String> execute(JsonNode input) {
-                sends.incrementAndGet(); // the real side-effect
+                sends.incrementAndGet();
                 return Mono.just("sent");
             }
         };
-        ToolRegistry registry = new ToolRegistry(List.of(email));
-        List<TraceEvent> trace = List.of(
-                TraceEvent.ofType("tool_call").with("turn", 1)
-                        .with("toolUseId", "e1").with("name", "send_email")
-                        .with("input", mapper.createObjectNode().put("to", "bob@example.com")),
-                TraceEvent.ofType("tool_result").with("turn", 1)
-                        .with("toolUseId", "e1").with("result", "sent"));
+    }
 
-        DivergenceReport report = new Replayer(registry, Set.of("send_email")).replay(trace);
+    // --- tests ---
 
-        assertThat(sends.get()).isZero(); // provably no side-effect
+    @Test
+    void faithfulWhenTheAgentReproducesTheTrajectory() {
+        ObjectNode input = mapper.createObjectNode().put("expression", "2 + 2");
+        DivergenceReport report = new Replayer(List.of(new CalculatorTool()))
+                .replay(session("calculator", input, "4"), Set.of());
         assertThat(report.faithful()).isTrue();
+        assertThat(report.exitCode()).isZero();
     }
 
     @Test
-    void removedToolSurfacesAsDivergence() {
-        ToolRegistry empty = new ToolRegistry(List.of()); // calculator no longer exists
-        DivergenceReport report = new Replayer(empty, Set.of()).replay(calculatorTrace("4"));
+    void executedToolWhoseBehaviorChangedDiverges() {
+        ObjectNode input = mapper.createObjectNode().put("expression", "2 + 2");
+        // recorded result was "999", but the real calculator returns "4"
+        DivergenceReport report = new Replayer(List.of(new CalculatorTool()))
+                .replay(session("calculator", input, "999"), Set.of("calculator"));
         assertThat(report.faithful()).isFalse();
-        assertThat(report.divergences().get(0).actual()).startsWith("ERROR: unknown tool");
+        assertThat(report.divergences()).anySatisfy(d -> {
+            assertThat(d.kind()).isEqualTo("tool.result");
+            assertThat(d.expected()).isEqualTo("999");
+            assertThat(d.actual()).isEqualTo("4");
+        });
     }
 
-    private AgentTool fixedTool(String name, String result) {
-        return new AgentTool() {
-            public String name() {
-                return name;
-            }
+    @Test
+    void toolIsNotExecutedByDefaultButIsWithExecute() {
+        AtomicInteger sends = new AtomicInteger();
+        ObjectNode input = mapper.createObjectNode().put("to", "bob@example.com");
 
-            public String description() {
-                return "test";
-            }
+        new Replayer(List.of(emailSpy(sends))).replay(session("send_email", input, "sent"), Set.of());
+        assertThat(sends.get()).isZero(); // safe default: never executed
 
-            public ObjectNode inputSchema(ObjectMapper m) {
-                return m.createObjectNode();
-            }
+        new Replayer(List.of(emailSpy(sends))).replay(session("send_email", input, "sent"), Set.of("send_email"));
+        assertThat(sends.get()).isEqualTo(1); // opted in
+    }
 
-            public Mono<String> execute(JsonNode input) {
-                return Mono.just(result);
-            }
-        };
+    @Test
+    void modelCallCountMismatchDiverges() {
+        // trace records two model calls, but an end_turn first response makes the agent stop after one
+        List<TraceEvent> trace = List.of(
+                TraceEvent.userMessage(1, "hi"), endTurn(1, "hello"), endTurn(2, "extra unused"));
+        DivergenceReport report = new Replayer(List.of()).replay(trace, Set.of());
+        assertThat(report.divergences()).anySatisfy(d -> assertThat(d.kind()).isEqualTo("model.calls"));
+    }
+
+    @Test
+    void replayNeedsARecordedPrompt() {
+        List<TraceEvent> noPrompt = List.of(endTurn(1, "answer"));
+        assertThatThrownBy(() -> new Replayer(List.of()).replay(noPrompt, Set.of()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("no user_message");
     }
 }

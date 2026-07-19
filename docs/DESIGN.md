@@ -60,6 +60,21 @@ calls through business logic) means the recorder is coupled only to stable
 interfaces, the target stays oblivious, and the same decorators work for any
 service built on those seams. Recording is an aspect, not a feature.
 
+### Trace scoping (a known deviation)
+
+The MVP writes **one trace per chat request** — i.e. per turn — keyed by a
+blackbox-assigned id, not by the application's own multi-turn `sessionId`. The
+reason is honest: correlation is carried in the Reactor Context set by a
+`WebFilter`, and the app's `sessionId` lives in the request body, which the
+filter would have to read (and re-inject) to key by it — extra plumbing we
+deferred. Consequence: a five-turn conversation becomes five files, which
+weakens the conversation-level features (multi-turn `diff`, `export-eval --turn`
+across a session). The intended fix is to read/inject the `sessionId` in the
+filter and **append per session** (turns numbered within one file); until then,
+reconstruct a conversation by combining its per-request traces. This is
+documented rather than hidden because silent scoping surprises are worse than a
+stated limitation.
+
 ## 4. Replay: deterministic, safe, judgmental
 
 `blackbox replay trace.jsonl` boots a headless harness:
