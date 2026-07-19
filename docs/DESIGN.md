@@ -60,20 +60,25 @@ calls through business logic) means the recorder is coupled only to stable
 interfaces, the target stays oblivious, and the same decorators work for any
 service built on those seams. Recording is an aspect, not a feature.
 
-### Trace scoping (a known deviation)
+### Trace scoping (session-keyed)
 
-The MVP writes **one trace per chat request** — i.e. per turn — keyed by a
-blackbox-assigned id, not by the application's own multi-turn `sessionId`. The
-reason is honest: correlation is carried in the Reactor Context set by a
-`WebFilter`, and the app's `sessionId` lives in the request body, which the
-filter would have to read (and re-inject) to key by it — extra plumbing we
-deferred. Consequence: a five-turn conversation becomes five files, which
-weakens the conversation-level features (multi-turn `diff`, `export-eval --turn`
-across a session). The intended fix is to read/inject the `sessionId` in the
-filter and **append per session** (turns numbered within one file); until then,
-reconstruct a conversation by combining its per-request traces. This is
-documented rather than hidden because silent scoping surprises are worse than a
-stated limitation.
+A trace is **one conversation, not one request.** The `WebFilter` reads the
+application's own `sessionId` from the chat request (the POST body — which it
+reads and re-injects so the controller still sees it) and keys the trace by it:
+the first turn opens `{sessionId}-{startedAt}.trace.jsonl`, and every later turn
+on the same `sessionId` **appends** to that same file. A `SessionRegistry` holds
+the open session across requests; turns are numbered within the file (the `turn`
+field on every event), so the conversation-level features — multi-turn `diff`,
+`export-eval --turn` across a session — operate on a whole conversation as
+intended.
+
+The session's trace is finalized (`session_end` written, file closed) when the
+conversation is **reset** (`DELETE /api/chat/{sessionId}`) or the app **shuts
+down** (`@PreDestroy` on the registry). A request that carries **no** `sessionId`
+falls back to a **transient per-request trace** (blackbox-assigned id, closed
+when the request completes) — so an un-sessioned agent still records, just
+without cross-turn correlation. Correlation stays in the Reactor Context set by
+the filter; the recorder never couples to the app's session type.
 
 ## 4. Replay: deterministic, safe, judgmental
 

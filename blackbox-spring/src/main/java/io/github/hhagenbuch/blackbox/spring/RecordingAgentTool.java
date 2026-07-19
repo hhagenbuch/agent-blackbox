@@ -45,23 +45,24 @@ public final class RecordingAgentTool implements AgentTool {
                 return delegate.execute(input);
             }
             RecordingSession session = ctx.get(RecordingSession.CONTEXT_KEY);
+            int turn = session.turn();
             String toolUseId = UUID.randomUUID().toString();
             long start = System.nanoTime();
             session.write(TraceEvent.ofType("tool_call")
-                    .with("turn", 1)
+                    .with("turn", turn)
                     .with("toolUseId", toolUseId)
                     .with("name", delegate.name())
                     .with("input", input == null ? TraceEvent.mapper().nullNode() : input));
             return delegate.execute(input)
-                    .doOnNext(result -> session.write(result(toolUseId, result, millisSince(start), false)))
+                    .doOnNext(result -> session.write(result(turn, toolUseId, result, millisSince(start), false)))
                     .doOnError(error -> session.write(
-                            result(toolUseId, String.valueOf(error.getMessage()), millisSince(start), true)));
+                            result(turn, toolUseId, String.valueOf(error.getMessage()), millisSince(start), true)));
         });
     }
 
-    private TraceEvent result(String toolUseId, String result, long millis, boolean error) {
+    private TraceEvent result(int turn, String toolUseId, String result, long millis, boolean error) {
         return TraceEvent.ofType("tool_result")
-                .with("turn", 1)
+                .with("turn", turn)
                 .with("toolUseId", toolUseId)
                 .with("result", result)
                 .with("millis", (int) millis)

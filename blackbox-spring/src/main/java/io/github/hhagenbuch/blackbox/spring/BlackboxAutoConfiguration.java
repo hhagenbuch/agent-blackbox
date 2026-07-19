@@ -25,7 +25,12 @@ public class BlackboxAutoConfiguration {
     }
 
     @Bean
-    public BlackboxWebFilter blackboxWebFilter(BlackboxProperties props) {
-        return new BlackboxWebFilter(props);
+    public SessionRegistry blackboxSessionRegistry() {
+        return new SessionRegistry();
+    }
+
+    @Bean
+    public BlackboxWebFilter blackboxWebFilter(BlackboxProperties props, SessionRegistry registry) {
+        return new BlackboxWebFilter(props, registry);
     }
 }
