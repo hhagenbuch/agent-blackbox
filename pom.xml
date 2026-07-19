@@ -25,13 +25,13 @@
     </repositories>
 
     <properties>
-        <maven.compiler.release>21</maven.compiler.release>
+        <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <jackson.version>2.17.2</jackson.version>
         <junit.version>5.10.3</junit.version>
         <assertj.version>3.26.3</assertj.version>
-        <spring-boot.version>3.3.5</spring-boot.version>
-        <starter.version>v0.1.1</starter.version>
+        <spring-boot.version>3.5.12</spring-boot.version>
+        <starter.version>v0.2.0</starter.version>
     </properties>
 
     <dependencyManagement>
