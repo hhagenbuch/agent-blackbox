@@ -38,6 +38,20 @@ trace-file schema. See [`docs/DESIGN.md`](docs/DESIGN.md) and
    case: the prompt, `tool_called` assertions from the real trajectory, and a
    `judge` stub for a human to confirm.
 
+Replay is working today:
+
+```console
+$ blackbox replay incident.trace.jsonl
+replay: faithful — current code reproduces the recorded trajectory   # exit 0
+
+$ blackbox replay incident.trace.jsonl        # after a tool regression
+replay: DIVERGED (1)
+  ✗ [tool.result] calculator (t1): recorded "468013", got "999999"   # exit 1
+```
+
+Recorded tool results are trusted and side-effecting tools are `--stub`bed, so a
+replay of a session that sent an email **cannot send it again** — its own test.
+
 It closes a loop no single repo can:
 [spring-ai-agent-starter](https://github.com/hhagenbuch/spring-ai-agent-starter)
 produces behavior → **agent-blackbox captures it** →
@@ -67,7 +81,7 @@ produces behavior → **agent-blackbox captures it** →
 - [ ] Phase 0 — design doc + trace schema (this)
 - [x] Phase 1 — `blackbox-core`: format + reader/writer (truncation-tolerant) + redaction
 - [x] Phase 2 — `blackbox-spring`: decorate-the-seam recording, zero target changes
-- [ ] Phase 3 — replay + divergence detection + `--interactive`, with the no-side-effects safety test
+- [x] Phase 3 — replay + divergence detection (safe: recorded tool results, stubbed side-effects)
 - [ ] Phase 4 — diff + `export-eval` (validated by running agent-evals in CI) + README GIF
 
 ## License
