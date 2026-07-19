@@ -15,3 +15,13 @@ jobs:
           cache: maven
       - name: Build and test
         run: mvn -B verify
+
+      # Cross-repo proof: export a case from a recorded incident and confirm the
+      # real agent-evals loads and runs it (the repos test each other).
+      - name: export-eval → run agent-evals on the output
+        run: |
+          java -jar blackbox-cli/target/blackbox.jar \
+            export-eval examples/incident.trace.jsonl --out /tmp/case.yaml --name blackbox-ci
+          echo "--- exported case ---"; cat /tmp/case.yaml
+          docker run --rm -v /tmp:/data ghcr.io/hhagenbuch/agent-evals:0.1.0 \
+            /data/case.yaml --target echo --report /data/report.md --min-pass-rate 0

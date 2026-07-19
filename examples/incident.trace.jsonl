@@ -1,0 +1,7 @@
+{"type":"session_start","v":"0.1","sessionId":"s1","at":"2026-07-19T00:00:00Z","runtime":{"app":"spring-ai-agent-starter","model":"claude-sonnet-5"}}
+{"type":"user_message","turn":1,"text":"What is 973 * 481? Use your calculator."}
+{"type":"llm_response","turn":1,"seq":1,"stopReason":"tool_use","text":"","toolCalls":[{"id":"tu1","name":"calculator","input":{"expression":"973 * 481"}}]}
+{"type":"tool_call","turn":1,"toolUseId":"tu1","name":"calculator","input":{"expression":"973 * 481"}}
+{"type":"tool_result","turn":1,"toolUseId":"tu1","result":"468013","error":false}
+{"type":"llm_response","turn":1,"seq":2,"stopReason":"end_turn","text":"973 × 481 = 468013.","toolCalls":[]}
+{"type":"session_end","at":"2026-07-19T00:00:02Z"}

@@ -64,13 +64,19 @@ public final class RecordingLlmClient implements LlmClient {
             c.put("name", call.name());
             c.set("input", call.input());
         }
-        return TraceEvent.ofType("llm_response")
+        TraceEvent event = TraceEvent.ofType("llm_response")
                 .with("turn", 1)
                 .with("seq", seq)
                 .with("stopReason", response.stopReason())
                 .with("text", response.text())
                 .with("toolCalls", toolCalls)
                 .with("millis", (int) millis);
+        // The provider's raw content array, replayed verbatim as the assistant message so
+        // loop-replay rebuilds byte-identical context (otherwise request digests falsely diverge).
+        if (response.rawContent() != null) {
+            event.with("rawContent", response.rawContent());
+        }
+        return event;
     }
 
     private static long millisSince(long startNanos) {
