@@ -1,10 +1,9 @@
 package io.github.hhagenbuch.blackbox.eval;
 
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
-import com.fasterxml.jackson.dataformat.yaml.YAMLGenerator;
-import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
+import tools.jackson.dataformat.yaml.YAMLMapper;
+import tools.jackson.dataformat.yaml.YAMLWriteFeature;
 import io.github.hhagenbuch.blackbox.core.TraceEvent;
 
 import java.util.LinkedHashSet;
@@ -23,8 +22,9 @@ import java.util.Set;
  */
 public final class EvalExporter {
 
-    private static final YAMLMapper YAML = new YAMLMapper(
-            new YAMLFactory().disable(YAMLGenerator.Feature.WRITE_DOC_START_MARKER));
+    private static final YAMLMapper YAML = YAMLMapper.builder()
+            .disable(YAMLWriteFeature.WRITE_DOC_START_MARKER)
+            .build();
 
     private EvalExporter() {
     }

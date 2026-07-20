@@ -1,6 +1,6 @@
 package io.github.hhagenbuch.blackbox.replay;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import io.github.hhagenbuch.agent.config.AgentProperties;
 import io.github.hhagenbuch.agent.core.AgentLoop;
 import io.github.hhagenbuch.agent.core.ConversationMemory;

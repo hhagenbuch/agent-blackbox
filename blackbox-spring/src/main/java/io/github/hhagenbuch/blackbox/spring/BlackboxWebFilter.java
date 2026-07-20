@@ -16,6 +16,8 @@ import org.springframework.web.server.WebFilterChain;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import tools.jackson.core.JacksonException;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
@@ -136,9 +138,9 @@ public final class BlackboxWebFilter implements WebFilter {
             return null;
         }
         try {
-            return TraceEvent.mapper().readTree(body).path(field).asText(null);
-        } catch (IOException e) {
-            return null; // not JSON we understand
+            return TraceEvent.mapper().readTree(body).path(field).asString(null);
+        } catch (JacksonException e) {
+            return null; // not JSON we understand (Jackson 3 throws this unchecked)
         }
     }
 

@@ -1,6 +1,6 @@
 package io.github.hhagenbuch.blackbox.core;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;

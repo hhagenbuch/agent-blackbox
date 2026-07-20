@@ -1,7 +1,7 @@
 package io.github.hhagenbuch.blackbox.eval;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.dataformat.yaml.YAMLMapper;
 import io.github.hhagenbuch.blackbox.core.TraceEvent;
 import org.junit.jupiter.api.Test;
 
