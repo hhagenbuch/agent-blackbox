@@ -1,7 +1,7 @@
 package io.github.hhagenbuch.blackbox.spring;
 
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 import io.github.hhagenbuch.agent.llm.LlmClient;
 import io.github.hhagenbuch.agent.llm.LlmResponse;
 import io.github.hhagenbuch.agent.llm.ToolCall;
@@ -94,7 +94,7 @@ public final class RecordingLlmClient implements LlmClient {
                 hex.append(String.format("%02x", b));
             }
             return hex.toString();
-        } catch (NoSuchAlgorithmException | com.fasterxml.jackson.core.JsonProcessingException e) {
+        } catch (NoSuchAlgorithmException | tools.jackson.core.JacksonException e) {
             return "sha256:unavailable";
         }
     }

@@ -1,6 +1,6 @@
 package io.github.hhagenbuch.blackbox.replay;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import io.github.hhagenbuch.agent.tools.AgentTool;
 import io.github.hhagenbuch.agent.tools.ToolRegistry;
 import io.github.hhagenbuch.blackbox.core.TraceEvent;

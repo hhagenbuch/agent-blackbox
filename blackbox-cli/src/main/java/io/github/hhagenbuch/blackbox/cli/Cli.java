@@ -1,7 +1,7 @@
 package io.github.hhagenbuch.blackbox.cli;
 
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 import io.github.hhagenbuch.agent.tools.impl.CalculatorTool;
 import io.github.hhagenbuch.agent.tools.impl.ClockTool;
 import io.github.hhagenbuch.blackbox.core.TraceEvent;

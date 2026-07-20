@@ -1,7 +1,7 @@
 package io.github.hhagenbuch.blackbox.replay;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
 import io.github.hhagenbuch.agent.llm.LlmResponse;
 import io.github.hhagenbuch.blackbox.core.TraceEvent;
 import org.junit.jupiter.api.Test;
