@@ -1,5 +1,10 @@
 # Keep dependencies current so the repo reads as actively maintained.
 # Dependabot opens PRs; CI (build + tests) gates them like any other change.
+#
+# Updates are GROUPED: without grouping, every coordinate gets its own PR, which
+# means ~10 PRs a week, each running a full `mvn -B verify`, and every merge
+# rebases the rest. Grouped PRs also prove the combination builds, which a pile of
+# individually-green PRs never does.
 version: 2
 updates:
   - package-ecosystem: "maven"
@@ -8,8 +13,19 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 5
     labels: ["dependencies"]
+    groups:
+      build-plugins:
+        patterns: ["org.apache.maven.plugins:*"]
+      test-libs:
+        patterns: ["org.junit*", "org.assertj:*", "org.mockito:*"]
+      runtime-libs:
+        patterns: ["com.fasterxml.jackson*", "tools.jackson*", "io.opentelemetry:*", "org.springframework*"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 3
     labels: ["dependencies"]
+    groups:
+      github-actions:
+        patterns: ["*"]
