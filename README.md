@@ -99,6 +99,21 @@ produces behavior → **agent-blackbox captures it** →
 | `blackbox-spring` | Spring Boot auto-config + recording decorators for `LlmClient` / `ToolRegistry` |
 | `blackbox-cli` | `replay`, `diff`, `export-eval`, `stats` (shaded jar) |
 
+## Using with agent-meter
+
+Both projects decorate the same `LlmClient` bean via a `BeanPostProcessor`, so the wrapping
+order is an explicit contract, not an accident:
+
+- **agent-blackbox**'s `RecordingBeanPostProcessor` is order **`0`** — applies first, wraps
+  **innermost**.
+- **[agent-meter](https://github.com/hhagenbuch/agent-meter)**'s
+  `LlmClientMeteringBeanPostProcessor` is `Ordered.LOWEST_PRECEDENCE` — applies last, wraps
+  **outermost**.
+
+That is the ordering you want: metering measures the whole call, and the recorder captures
+the request/response exactly as the delegate sees it. Enable both together; no configuration
+needed.
+
 ## Design highlights
 
 - **Failures are events, not gaps** — an error mid-turn is recorded exactly where

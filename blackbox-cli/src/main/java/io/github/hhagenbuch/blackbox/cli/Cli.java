@@ -14,15 +14,21 @@ import io.github.hhagenbuch.blackbox.replay.Replayer;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
 /**
  * <pre>
  * blackbox replay      &lt;trace.jsonl&gt; [--execute &lt;tool&gt;]... [--json]
  * blackbox diff        &lt;a.trace.jsonl&gt; &lt;b.trace.jsonl&gt; [--json]
  * blackbox export-eval &lt;trace.jsonl&gt; [--turn N] [--out FILE] [--name NAME]
+ * blackbox stats       &lt;trace.jsonl&gt;
  * </pre>
  *
  * Exit codes: replay — 0 faithful / 1 diverged; all — 2 on usage error.
@@ -41,6 +47,7 @@ public final class Cli {
             case "replay" -> replay(args);
             case "diff" -> diff(args);
             case "export-eval" -> exportEval(args);
+            case "stats" -> stats(args);
             default -> usage("unknown subcommand: " + args[0]);
         };
     }
@@ -166,12 +173,74 @@ public final class Cli {
         return root.toPrettyString();
     }
 
+    // --- stats ---
+
+    /** A read-only summary of one trace: what happened, how many turns, which tools, how long. */
+    static String statsReport(List<TraceEvent> events) {
+        Map<String, Integer> byType = new TreeMap<>();
+        List<String> tools = new ArrayList<>();
+        int turns = 0;
+        String startedAt = null;
+        String endedAt = null;
+        for (TraceEvent event : events) {
+            byType.merge(event.type(), 1, Integer::sum);
+            turns = Math.max(turns, event.turn());
+            switch (event.type()) {
+                case "tool_call" -> {
+                    String name = event.get("name").asText("");
+                    if (!name.isEmpty() && !tools.contains(name)) {
+                        tools.add(name);
+                    }
+                }
+                case "session_start" -> startedAt = event.get("at").asText(null);
+                case "session_end" -> endedAt = event.get("at").asText(null);
+                default -> { /* counted above */ }
+            }
+        }
+        StringBuilder out = new StringBuilder();
+        out.append("events: ").append(events.size()).append('\n');
+        out.append("turns: ").append(turns).append('\n');
+        out.append("tools used: ").append(tools.isEmpty() ? "(none)" : String.join(", ", tools)).append('\n');
+        out.append("duration: ").append(duration(startedAt, endedAt)).append('\n');
+        out.append("by type:\n");
+        byType.forEach((type, count) -> out.append("  ").append(type).append(": ").append(count).append('\n'));
+        return out.toString();
+    }
+
+    /** Wall time between session_start and session_end; "(unknown)" if either is absent/unparseable. */
+    private static String duration(String startedAt, String endedAt) {
+        if (startedAt == null || endedAt == null) {
+            return "(unknown)";
+        }
+        try {
+            return Duration.between(Instant.parse(startedAt), Instant.parse(endedAt)).toMillis() + " ms";
+        } catch (RuntimeException e) {
+            return "(unknown)";
+        }
+    }
+
+    private static int stats(String[] args) {
+        String tracePath = null;
+        for (int i = 1; i < args.length; i++) {
+            if (args[i].startsWith("--") || tracePath != null) {
+                return usage("bad stats arguments");
+            }
+            tracePath = args[i];
+        }
+        if (tracePath == null) {
+            return usage("missing <trace.jsonl>");
+        }
+        System.out.print(statsReport(TraceReader.readEvents(Path.of(tracePath))));
+        return 0;
+    }
+
     private static int usage(String problem) {
         System.err.println("error: " + problem);
         System.err.println("usage:");
         System.err.println("  blackbox replay <trace.jsonl> [--execute <tool>]... [--json]");
         System.err.println("  blackbox diff <a.trace.jsonl> <b.trace.jsonl> [--json]");
         System.err.println("  blackbox export-eval <trace.jsonl> [--turn N] [--out FILE] [--name NAME]");
+        System.err.println("  blackbox stats <trace.jsonl>");
         return 2;
     }
 }
