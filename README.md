@@ -1,7 +1,7 @@
 # agent-blackbox
 
 [![CI](https://github.com/hhagenbuch/agent-blackbox/actions/workflows/ci.yml/badge.svg)](https://github.com/hhagenbuch/agent-blackbox/actions/workflows/ci.yml)
-![Java 21](https://img.shields.io/badge/Java-21-blue)
+![Java 25](https://img.shields.io/badge/Java-25-blue)
 
 > When an agent misbehaves in production, you get a support ticket and a shrug.
 > There's no stack trace for "it chose the wrong tool and then lied about it."
@@ -23,6 +23,28 @@ $ blackbox export-eval incident.trace.jsonl --turn 1 --out cases/incident-1234.y
 # → an agent-evals case: the prompt, tool_called assertions from the real
 #   trajectory, and a judge stub for a human to confirm. Every incident becomes
 #   a regression test.
+```
+
+## Architecture
+
+Recording decorates the starter's seams; a whole conversation is one
+append-only trace; the CLI turns that trace into replay, diff, and eval cases.
+
+```mermaid
+flowchart LR
+    subgraph svc["Agent service · blackbox-spring auto-config"]
+      F[BlackboxWebFilter] --> SR[SessionRegistry]
+      SR --> S[RecordingSession<br/>one conversation · turns numbered]
+      RL[RecordingLlmClient] -. decorates .-> LC[LlmClient]
+      RT[RecordingAgentTool] -. decorates .-> TR[ToolRegistry]
+      RL --> S
+      RT --> S
+    end
+    S --> J[(session trace<br/>*.trace.jsonl · append-only)]
+    J --> CLI{{blackbox-cli}}
+    CLI --> RP[replay<br/>deterministic · safe]
+    CLI --> DF[diff<br/>run vs run]
+    CLI --> EX[export-eval<br/>→ agent-evals case]
 ```
 
 ## How it works
