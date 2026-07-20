@@ -23,5 +23,14 @@ jobs:
           java -jar blackbox-cli/target/blackbox.jar \
             export-eval examples/incident.trace.jsonl --out /tmp/case.yaml --name blackbox-ci
           echo "--- exported case ---"; cat /tmp/case.yaml
+          # Pull explicitly first so an unavailable image fails with a clear cause rather
+          # than a bare `docker run` error. The GHCR package is public (verified by an
+          # unauthenticated pull); if that ever changes, this is the line that says so.
+          # We fail rather than skip: this step is the cross-repo proof, and silently
+          # passing would make a broken integration look green.
+          if ! docker pull ghcr.io/hhagenbuch/agent-evals:0.1.0; then
+            echo "::error::agent-evals image unavailable — is the GHCR package still public? (ghcr.io/hhagenbuch/agent-evals:0.1.0)"
+            exit 1
+          fi
           docker run --rm -v /tmp:/data ghcr.io/hhagenbuch/agent-evals:0.1.0 \
             /data/case.yaml --target echo --report /data/report.md --min-pass-rate 0
