@@ -27,7 +27,7 @@
     <properties>
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <junit.version>5.10.3</junit.version>
+        <junit.version>6.1.2</junit.version>
         <assertj.version>3.26.3</assertj.version>
         <spring-boot.version>4.1.0</spring-boot.version>
         <starter.version>v0.3.0</starter.version>
