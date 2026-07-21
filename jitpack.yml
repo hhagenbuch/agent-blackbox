@@ -1,0 +1,6 @@
+# Build on JDK 25, and use the Maven Wrapper so JitPack builds with a modern
+# Maven (its default is too old for maven-compiler-plugin 3.13).
+jdk:
+  - openjdk25
+install:
+  - ./mvnw install -DskipTests
