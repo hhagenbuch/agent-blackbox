@@ -12,6 +12,7 @@
     <description>A flight recorder for agents: record, replay, diff, export-eval.</description>
 
     <modules>
+        <module>blackbox-redact</module>
         <module>blackbox-core</module>
         <module>blackbox-spring</module>
         <module>blackbox-cli</module>

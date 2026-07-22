@@ -1,5 +1,7 @@
 package io.github.hhagenbuch.blackbox.core;
 
+import io.github.hhagenbuch.blackbox.redact.Redactions;
+import io.github.hhagenbuch.blackbox.redact.Scrubber;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
@@ -14,15 +16,20 @@ import java.util.regex.Pattern;
  * scrubbed span is replaced with {@link #MARK} and the event is flagged
  * {@code "redacted": true} — marked, never silently altered, so a reader can
  * always tell a value was removed rather than absent.
+ *
+ * <p>The patterns and the string-level scrubbing live in the Jackson-free
+ * {@code blackbox-redact} module ({@link Scrubber}), so the same redaction any
+ * project can reuse on plain strings is exactly what runs here on trace events.
  */
 public final class Redactor {
 
-    public static final String MARK = "[redacted]";
+    /** @see Redactions#MARK */
+    public static final String MARK = Redactions.MARK;
 
-    private final List<Pattern> patterns;
+    private final Scrubber scrubber;
 
     public Redactor(List<Pattern> patterns) {
-        this.patterns = List.copyOf(patterns);
+        this.scrubber = new Scrubber(patterns);
     }
 
     /** No-op redactor (used when redaction is disabled). */
@@ -32,18 +39,11 @@ public final class Redactor {
 
     /** Common scrubbers: emails, card-like number runs, and {@code sk-}/{@code xox…} style keys. */
     public static Redactor defaults() {
-        return new Redactor(List.of(
-                Pattern.compile("[\\w.+-]+@[\\w-]+\\.[\\w.-]+"),          // email
-                Pattern.compile("\\b(?:\\d[ -]?){13,16}\\b"),            // card-like
-                Pattern.compile("\\b(?:sk|xox[baprs])-[A-Za-z0-9_-]{12,}\\b") // API keys
-        ));
+        return new Redactor(Redactions.defaults());
     }
 
     /** Returns a redacted copy of the event; the input is not mutated. */
     public TraceEvent redact(TraceEvent event) {
-        if (patterns.isEmpty()) {
-            return event;
-        }
         ObjectNode copy = event.node().deepCopy();
         if (scrub(copy)) {
             copy.put("redacted", true);
@@ -84,10 +84,6 @@ public final class Redactor {
     }
 
     private String apply(String value) {
-        String out = value;
-        for (Pattern pattern : patterns) {
-            out = pattern.matcher(out).replaceAll(MARK);
-        }
-        return out;
+        return scrubber.apply(value);
     }
 }
