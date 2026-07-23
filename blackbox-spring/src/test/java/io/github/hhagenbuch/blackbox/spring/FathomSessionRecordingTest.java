@@ -30,6 +30,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
@@ -89,10 +90,23 @@ class FathomSessionRecordingTest {
     }
 
     private List<TraceEvent> readOnlyTrace() throws Exception {
-        try (Stream<Path> files = Files.list(traceDir)) {
-            Path trace = files.filter(p -> p.toString().endsWith(".trace.jsonl")).findFirst().orElseThrow();
-            return TraceReader.readEvents(trace);
+        // The trace is written asynchronously off the request thread, so under
+        // CI load session_end can lag the /api/chat response. Await the terminal
+        // event before asserting the trajectory rather than reading eagerly.
+        for (int i = 0; i < 100; i++) {
+            Optional<Path> trace;
+            try (Stream<Path> files = Files.list(traceDir)) {
+                trace = files.filter(p -> p.toString().endsWith(".trace.jsonl")).findFirst();
+            }
+            if (trace.isPresent()) {
+                List<TraceEvent> events = TraceReader.readEvents(trace.get());
+                if (events.stream().anyMatch(e -> e.type().equals("session_end"))) {
+                    return events;
+                }
+            }
+            Thread.sleep(50);
         }
+        throw new AssertionError("trace did not reach session_end within timeout");
     }
 
     private TraceEvent firstOfType(List<TraceEvent> events, String type) {
