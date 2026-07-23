@@ -1,5 +1,6 @@
 package io.github.hhagenbuch.blackbox.spring;
 
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
@@ -13,15 +14,17 @@ import io.github.hhagenbuch.blackbox.core.TraceEvent;
 import io.github.hhagenbuch.blackbox.core.TraceReader;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
+import reactor.core.publisher.Mono;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -31,16 +34,20 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
-import org.springframework.beans.factory.annotation.Autowired;
-import reactor.core.publisher.Mono;
-
 import static org.assertj.core.api.Assertions.assertThat;
 
+/**
+ * Blackbox records a fathom-backed session: the agent calls fathom's {@code verify}
+ * tool, which reports a STALE index, and the recorder captures that honest result
+ * on the tool_result event ... exactly the trace agent-medic would diagnose from.
+ * Zero changes to the agent; the fathom tool is decorated via the AgentTool seam
+ * like any other. Uses a stub fathom tool so CI needs no fathom jar.
+ */
 @SpringBootTest(
-        classes = {AgentStarterApplication.class, BlackboxRecordingIntegrationTest.FakeAgent.class},
+        classes = {AgentStarterApplication.class, FathomSessionRecordingTest.FathomAgent.class},
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureWebTestClient
-class BlackboxRecordingIntegrationTest {
+class FathomSessionRecordingTest {
 
     @TempDir
     static Path traceDir;
@@ -55,44 +62,37 @@ class BlackboxRecordingIntegrationTest {
     WebTestClient client;
 
     @Test
-    void recordsAChatSessionAsATraceWithZeroChangesToTheStarter() throws Exception {
+    void recordsAFathomVerifyCallAndItsStaleResult() throws Exception {
         client.post().uri("/api/chat")
                 .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue("{\"message\": \"what is 2 + 2? use your calculator\"}")
+                .bodyValue("{\"message\": \"can I trust the indexed value in Money.java? verify it\"}")
                 .exchange()
                 .expectStatus().isOk();
 
         List<TraceEvent> events = readOnlyTrace();
         List<String> types = events.stream().map(TraceEvent::type).toList();
 
-        // the full trajectory the agent took, in order
         assertThat(types).containsSubsequence(
                 "session_start",
-                "user_message",                  // the prompt, captured from the request body
-                "llm_request", "llm_response",   // model asks for the calculator
-                "tool_call", "tool_result",      // calculator runs (recorded via the AgentTool seam)
-                "llm_request", "llm_response",   // model answers
+                "user_message",
+                "llm_request", "llm_response",   // model asks fathom to verify
+                "tool_call", "tool_result",      // fathom verify runs (recorded via the AgentTool seam)
+                "llm_request", "llm_response",   // model relays the honest answer
                 "session_end");
 
-        assertThat(firstOfType(events, "user_message").text())
-                .isEqualTo("what is 2 + 2? use your calculator");
-
-        // the tool_call/tool_result pair correlates by a single toolUseId
         TraceEvent toolCall = firstOfType(events, "tool_call");
         TraceEvent toolResult = firstOfType(events, "tool_result");
-        assertThat(toolCall.get("name").asText()).isEqualTo("calculator");
+        assertThat(toolCall.get("name").asText()).isEqualTo("verify");
         assertThat(toolResult.get("toolUseId").asText()).isEqualTo(toolCall.get("toolUseId").asText());
-        assertThat(toolResult.get("result").asText()).isEqualTo("4");
+        // the honesty property is what got recorded ... not a confident stale value
+        assertThat(toolResult.get("result").asText()).contains("verified: false").contains("STALE");
         assertThat(toolResult.get("error").asBoolean()).isFalse();
-
-        // llm_request carries a digest, not the raw messages (privacy-sane default)
-        assertThat(firstOfType(events, "llm_request").get("messagesDigest").asText()).startsWith("sha256:");
     }
 
     private List<TraceEvent> readOnlyTrace() throws Exception {
         // The trace is written asynchronously off the request thread, so under
         // CI load session_end can lag the /api/chat response. Await the terminal
-        // event before asserting rather than reading eagerly (fixes a flake).
+        // event before asserting the trajectory rather than reading eagerly.
         for (int i = 0; i < 100; i++) {
             Optional<Path> trace;
             try (Stream<Path> files = Files.list(traceDir)) {
@@ -113,9 +113,10 @@ class BlackboxRecordingIntegrationTest {
         return events.stream().filter(e -> e.type().equals(type)).findFirst().orElseThrow();
     }
 
-    /** Replaces the real Anthropic client with a scripted one: ask for the calculator, then answer. */
+    /** A scripted model that asks fathom to verify, plus a stub fathom `verify` tool. */
     @TestConfiguration
-    static class FakeAgent {
+    static class FathomAgent {
+
         @Bean
         @Primary
         LlmClient fakeLlmClient(ObjectMapper mapper) {
@@ -124,16 +125,48 @@ class BlackboxRecordingIntegrationTest {
                 @Override
                 public Mono<LlmResponse> chat(List<ObjectNode> messages, Collection<AgentTool> tools) {
                     if (call.getAndIncrement() == 0) {
-                        ObjectNode input = mapper.createObjectNode().put("expression", "2 + 2");
+                        ObjectNode input = mapper.createObjectNode().put("id", "File:sample/src/Money.java");
                         ArrayNode content = mapper.createArrayNode();
-                        content.addObject().put("type", "tool_use").put("id", "tu_1").put("name", "calculator")
+                        content.addObject().put("type", "tool_use").put("id", "tu_1").put("name", "verify")
                                 .set("input", input);
-                        return Mono.just(new LlmResponse("", List.of(new ToolCall("tu_1", "calculator", input)),
+                        return Mono.just(new LlmResponse("", List.of(new ToolCall("tu_1", "verify", input)),
                                 content, "tool_use", TokenUsage.EMPTY));
                     }
                     ArrayNode content = mapper.createArrayNode();
-                    content.addObject().put("type", "text").put("text", "2 + 2 = 4");
-                    return Mono.just(new LlmResponse("2 + 2 = 4", List.of(), content, "end_turn", TokenUsage.EMPTY));
+                    content.addObject().put("type", "text")
+                            .put("text", "The index is stale, so I can't trust it ... reindex first.");
+                    return Mono.just(new LlmResponse("The index is stale, so I can't trust it ... reindex first.",
+                            List.of(), content, "end_turn", TokenUsage.EMPTY));
+                }
+            };
+        }
+
+        /** Stub of fathom's `verify` tool: reports the index no longer matches the source. */
+        @Bean
+        AgentTool fathomVerifyTool() {
+            return new AgentTool() {
+                @Override
+                public String name() {
+                    return "verify";
+                }
+
+                @Override
+                public String description() {
+                    return "Re-read an entity's source and confirm the index still matches it.";
+                }
+
+                @Override
+                public ObjectNode inputSchema(ObjectMapper mapper) {
+                    ObjectNode schema = mapper.createObjectNode();
+                    schema.put("type", "object");
+                    schema.putObject("properties").putObject("id").put("type", "string");
+                    return schema;
+                }
+
+                @Override
+                public Mono<String> execute(JsonNode input) {
+                    return Mono.just("File:sample/src/Money.java\nverified: false  [STALE]\n"
+                            + "live source differs from the index → run reindex.");
                 }
             };
         }
